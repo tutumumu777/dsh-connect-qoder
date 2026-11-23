@@ -114,10 +114,13 @@ importers:
         version: 7.8.5
       tsdown:
         specifier: ^0.22.2
-        version: 0.22.14(typescript@5.9.3)
+        version: 0.22.14(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      unrun:
+        specifier: ^0.3.1
+        version: 0.3.1
       vitest:
         specifier: ^4.1.8
         version: 4.1.11(@types/node@22.20.5)(jsdom@29.1.1)(vite@8.3.4(@types/node@22.20.5)(yaml@2.9.1))
@@ -1620,6 +1623,16 @@ packages:
   undici@7.30.0:
     resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
     engines: {node: '>=20.18.1'}
+
+  unrun@0.3.1:
+    resolution: {integrity: sha512-onIck/oNnCaytwths1ZVp1LK2Gq2hPoyFhiHebObuUXqR3S0uHuLLaBK8K6mRRgV7Ptip8AnNvaUsgzwWwBZuA==}
+    engines: {node: ^22.13.0 || >=24.0.0}
+    hasBin: true
+    peerDependencies:
+      synckit: ^0.11.11
+    peerDependenciesMeta:
+      synckit:
+        optional: true
 
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
@@ -3140,7 +3153,7 @@ snapshots:
 
   ts-algebra@2.0.0: {}
 
-  tsdown@0.22.14(typescript@5.9.3):
+  tsdown@0.22.14(typescript@5.9.3)(unrun@0.3.1):
     dependencies:
       ansis: 4.4.0
       cac: 7.0.1
@@ -3159,6 +3172,7 @@ snapshots:
       verkit: 0.3.2
     optionalDependencies:
       typescript: 5.9.3
+      unrun: 0.3.1
     transitivePeerDependencies:
       - '@typescript/native-preview'
       - '@volar/typescript'
@@ -3179,6 +3193,10 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici@7.30.0: {}
+
+  unrun@0.3.1:
+    dependencies:
+      rolldown: 1.2.13
 
   vary@1.1.2: {}
 

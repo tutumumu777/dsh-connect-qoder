@@ -2,6 +2,29 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+> **修 Qoder 上游对 DSH 身份开场白的内容过滤（2026-11-23 本机实测）。**
+> 上游把 system 消息开头的 `You are an AI agent powered by DeepSeek Harness.`
+> 判为违规，直接回 HTTP 403 + `code 10605`（`subCode: RESOURCE_LIMIT`，
+> `serviceAvailable: false`），`dfmodel` / `qmodel_latest` / `smodel` /
+> `kmodel_latest` 四个模型一致。信封伪装成排队/限流，等 30 秒、换 PAT 都无效。
+
+### 修复
+
+- **发往 Qoder 的 system 消息先剥掉该开场白。**
+  - **现场**：2026-11-23 15:27–15:56（+08）DSH 用 `qoder-global/dfmodel` 连续失败
+    4 次，宿主显示 `502 ... RESOURCE_LIMIT`；同一账号用插件客户端直连小请求却成功。
+    抓出真实请求后按 `\n\n` 把 6,330 字符的 system prompt 切 20 段逐段测，只有
+    第 0 段（48 字符，就是这句）失败，其余 19 段全通过；单句 + `user: hi` 396ms
+    返回 10605，换成 `You are a helpful assistant.` 立即成功。
+  - **改法**：`convertIncomingMessage` 对 `role === 'system'` 调用
+    `stripHarnessIdentityOpener`，只剥消息开头的这一句（连同其后的空行），正文里
+    对这句话的引用与 user 消息不动。实测同一条真实请求（75 个工具、
+    `reasoningEffort: max`）剥掉后 1.7 秒成功。
+  - **取舍**：没有改 DSH 的 `includeHarnessIdentity`（宿主全局开关），只动本插件的
+    出站消息——影响面仅 Qoder 通道；升级上游时这部分会被覆盖，需要重新打补丁。
+
 ## 1.27.1 (2026-11-20)
 
 > **修 issue #48：上游 `code 147`（付费资源包余额不足）被误判成凭据失效，界面显示

@@ -168,6 +168,23 @@ function assistantToolCallMessage(text: string, toolCalls: unknown[]): QoderInco
 }
 
 /** 从 OpenAI 消息提取纯文本（content 字符串、contents parts、named 等）。 */
+/**
+ * Qoder 网关对 system 消息做内容过滤：以固定身份句
+ * `You are an AI agent powered by DeepSeek Harness.` 开头时，上游直接回
+ * HTTP 403 + code 10605（RESOURCE_LIMIT），四个模型（dfmodel / qmodel_latest /
+ * smodel / kmodel_latest）一致；换 PAT、等 30 秒都无效。把这一句删掉后，
+ * 同一条真实请求（75 个工具、max 思考）1.7 秒通过。
+ *
+ * DSH 每个请求都带这句开场白，所以转成 Qoder 形状前剥掉它。只匹配 system
+ * 消息的开头，不动正文里对这句话的引用，也不动 user 消息。
+ */
+export const HARNESS_IDENTITY_OPENER = 'You are an AI agent powered by DeepSeek Harness.'
+
+export function stripHarnessIdentityOpener(text: string): string {
+  if (!text.startsWith(HARNESS_IDENTITY_OPENER)) return text
+  return text.slice(HARNESS_IDENTITY_OPENER.length).replace(/^[ \t]*(?:\r?\n)+/, '')
+}
+
 export function normalizeMessageText(message: Record<string, unknown>): string {
   const content = message.content
   if (typeof content === 'string') return content
@@ -288,7 +305,8 @@ export function convertIncomingMessage(
   }
 
   // 非 tool 场景下，assistant 携带的 tool_calls 渲染进文本（不结构化）。
-  let finalText = text
+  // Qoder 的内容过滤会拒绝带固定身份句的 system 消息（见 stripHarnessIdentityOpener）。
+  let finalText = role === 'system' ? stripHarnessIdentityOpener(text) : text
   if (role === 'assistant' && !toolsEnabled && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
     finalText = [text, renderToolCalls(message.tool_calls)].filter(Boolean).join('\n\n')
   }

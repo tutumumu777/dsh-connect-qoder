@@ -113,3 +113,26 @@ describe('template', () => {
     expect(t.aliyun_user_type).toBe('personal_pro')
   })
 })
+describe('harness identity opener (Qoder content filter)', () => {
+  const identity = 'You are an AI agent powered by DeepSeek Harness.'
+
+  it('strips the fixed identity opener from a system message', () => {
+    const out = convertIncomingMessage({ role: 'system', content: `${identity}\n\nYou are a coding agent.` }, false, false)
+    expect(out?.role).toBe('system')
+    expect(out?.content).toBe('You are a coding agent.')
+  })
+
+  it('leaves the same text in a user message untouched', () => {
+    const out = convertIncomingMessage({ role: 'user', content: `${identity}\n\nhello` }, false, false)
+    expect((out as QoderIncomingMessage).contents?.[0]?.text).toBe(`${identity}\n\nhello`)
+  })
+
+  it('keeps a system message that only mentions the phrase later', () => {
+    const out = convertIncomingMessage({ role: 'system', content: `Intro.\n\n${identity}` }, false, false)
+    expect(out?.content).toBe(`Intro.\n\n${identity}`)
+  })
+
+  it('drops a system message that consists of the opener alone', () => {
+    expect(convertIncomingMessage({ role: 'system', content: identity }, false, false)).toBeNull()
+  })
+})
