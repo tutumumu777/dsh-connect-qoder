@@ -213,7 +213,13 @@ export interface QoderModelInfo {
   promotion?: QoderPromotion
 }
 
-/** 默认上下文预算（模型未声明任何档位时）。 */
+/** 客户端上下文档位（与 Qoder 官方客户端一致）：200K / 400K / 1M。 */
+export const QODER_CLIENT_CONTEXT_TIERS: readonly number[] = [200_000, 400_000, 1_000_000]
+
+/** 客户端默认上下文预算（上游没声明任何档位时取 1M）。 */
+export const QODER_CLIENT_DEFAULT_CONTEXT = 1_000_000
+
+/** 旧兜底默认值：上游声明了档位、但档位里没有 1M 时，作为最后的回落。 */
 export const QODER_DEFAULT_CONTEXT = 200_000
 
 /** 从 context_config 档位表提取升序 token 档位（无档位返回 undefined）。 */
@@ -226,21 +232,14 @@ export function contextTiersOf(raw: QoderUpstreamModel): number[] | undefined {
 }
 
 /**
- * 档位改写表：上游声明的 400K 档一律按 **500K** 呈现与保存（用户要求，2026-10-24）。
+ * 档位改写表：**已清空**（2026-11-23）。
  *
- * 为什么改在解析边界：档位表只有一个写点（`parseUpstreamModel`）与一个存档读点
- * （`modelFromStored`），在这里改写，卡片下拉、usage 投影、落盘往返、运行期预算
- * 四处拿到的就是同一份改写后的表——在渲染层改只会让「下拉里的选项」与「保存后
- * 生效的窗口」重新变成两张表。上游哪天真的改口发 500K，这张表变成恒等映射，
- * 不需要再动任何读点。
- *
- * 档位是**插件本地的上下文预算**（聊天请求体里没有任何上下文字段，实测
- * `createChatBodyTemplate`），所以改写只影响 DSH 侧的预算选择与显示，不替上游
- * 承诺它没声明的窗口。
+ * 早先为了实现「下拉里不出现 400K」，这里把 400K 映射成 500K。但 Qoder 客户端
+ * 实际提供的是 200K / 400K / 1M 三档，改写反而让「客户端能选的那一档」在 DSH 里
+ * 选不到。现在原样呈现；映射表保留为空，是为了让 `migrateContextBudgets` 等旧
+ * 读路径继续走同一个出口（恒等映射对旧存档没有副作用）。
  */
-export const QODER_CONTEXT_TIER_OVERRIDES: ReadonlyMap<number, number> = new Map([
-  [400_000, 500_000],
-])
+export const QODER_CONTEXT_TIER_OVERRIDES: ReadonlyMap<number, number> = new Map()
 
 /** 单个档位值过改写表；表里没有的原样返回。 */
 export function mapContextTier(value: number): number {
@@ -253,11 +252,8 @@ export function mapContextTiers(tiers: readonly number[]): number[] {
 }
 
 /**
- * 已保存的预算过改写表：旧存档里的 400K 选择读回时就是 500K。
- *
- * 不做这一步，升级前勾了 400K 的人会在下拉里看到一个「不在选项里的选中值」——
- * `<select>` 的 value 命中不了任何 option，界面只会显示成空白或第一项，比没迁移
- * 更糟。
+ * 已保存的预算过改写表。改写表已清空，这个函数现在是恒等映射；保留它是为了让
+ * 旧存档（含 400K/500K 的预算）继续走同一条读取路径，不出现「两套迁移规则」。
  */
 export function migrateContextBudgets(budgets: Readonly<Record<string, number>>): Record<string, number> {
   const out: Record<string, number> = {}
@@ -367,10 +363,14 @@ export function canDisableThinkingOf(raw: QoderUpstreamModel, supportsThinking: 
 
 /** 把上游 snake_case 条目解析成 DSH 侧模型信息。 */
 export function parseUpstreamModel(raw: QoderUpstreamModel): QoderModelInfo {
-  // 默认档与档位表都过改写表（400K→500K）：只改表不改默认档，会出现「选中值不在
-  // 选项里」的下拉（`<select>` 的 value 命中不了任何 option）。
-  const contextWindow = mapContextTier(pickDefaultContextWindow(raw) ?? raw.max_input_tokens ?? QODER_DEFAULT_CONTEXT)
-  const tiers = contextTiersOf(raw)
+  // 客户端档位：上游没下发 context_config 时，按 Qoder 客户端的 200K/400K/1M
+  // 三档兜底，默认取 1M。上游给了档位表就原样使用；只要表里有 1M，默认仍取 1M
+  // （与客户端行为一致）。档位是插件本地的上下文预算，请求体里没有这个字段。
+  const upstreamTiers = contextTiersOf(raw)
+  const tiers = upstreamTiers === undefined ? [...QODER_CLIENT_CONTEXT_TIERS] : mapContextTiers(upstreamTiers)
+  const contextWindow = tiers.includes(QODER_CLIENT_DEFAULT_CONTEXT)
+    ? QODER_CLIENT_DEFAULT_CONTEXT
+    : mapContextTier(pickDefaultContextWindow(raw) ?? raw.max_input_tokens ?? QODER_DEFAULT_CONTEXT)
   const reasoning = thinkingOf(raw.thinking_config)
   const supportsThinking = supportsThinkingOf(raw)
   const promotion = parseQoderPromotion(raw.raw['promotion'])
@@ -390,7 +390,7 @@ export function parseUpstreamModel(raw: QoderUpstreamModel): QoderModelInfo {
     isDefault: raw.is_default,
     isFree: raw.is_free === true,
     isNew: false,
-    ...tiersField(tiers === undefined ? undefined : mapContextTiers(tiers)),
+    ...tiersField(tiers),
     ...promotion === undefined ? {} : { promotion },
   }
 }
@@ -432,7 +432,8 @@ export function fallbackModelInfo(m: QoderFallbackModel): QoderModelInfo {
     key: m.key,
     displayName: m.displayName,
     priceFactor: m.priceFactor ?? 1,
-    contextWindow: m.maxInputTokens ?? QODER_DEFAULT_CONTEXT,
+    contextWindow: QODER_CLIENT_DEFAULT_CONTEXT, // local patch: default context
+    contextTiers: [...QODER_CLIENT_CONTEXT_TIERS], // local patch: client tiers
     maxOutputTokens: m.maxOutputTokens ?? 32_768,
     supportsImages: m.isVl,
     supportsThinking: m.thinkingEfforts !== undefined || m.isReasoning,

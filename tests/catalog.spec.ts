@@ -50,7 +50,9 @@ describe('model parsing', () => {
     expect(info.priceFactor).toBe(2.5)
     expect(info.supportsThinking).toBe(true)
     expect(info.maxOutputTokens).toBe(32_768)
-    expect(info.contextWindow).toBe(200_000)
+    // 上游没下发 context_config：按客户端 200K/400K/1M 三档兜底，默认 1M。
+    expect(info.contextWindow).toBe(1_000_000)
+    expect(info.contextTiers).toEqual([200_000, 400_000, 1_000_000])
   })
 
   it('picks the default context window from context_config', () => {
@@ -62,8 +64,9 @@ describe('model parsing', () => {
   })
 
   it('falls back to max_input_tokens and then the default', () => {
-    expect(parseUpstreamModel(rawModel({ max_input_tokens: 500_000 })).contextWindow).toBe(500_000)
-    expect(parseUpstreamModel(rawModel({ max_input_tokens: undefined })).contextWindow).toBe(200_000)
+    // 没有 context_config 时按客户端三档兜底，默认 1M（max_input_tokens 只作兜底）。
+    expect(parseUpstreamModel(rawModel({ max_input_tokens: 500_000 })).contextWindow).toBe(1_000_000)
+    expect(parseUpstreamModel(rawModel({ max_input_tokens: undefined })).contextWindow).toBe(1_000_000)
   })
 
   it('canDisableThinking is true when thinking_config.disabled exists', () => {
@@ -445,27 +448,27 @@ describe('contextTiers + applyContextBudgets', () => {
   })
 })
 
-describe('档位改写表（400K → 500K，用户要求 2026-10-24）', () => {
-  it('mapContextTier 只改写表里的值，其余原样', () => {
-    expect(mapContextTier(400_000)).toBe(500_000)
+describe('客户端档位（200K / 400K / 1M，2026-11-23 与 Qoder 客户端对齐）', () => {
+  it('mapContextTier 是恒等映射（改写表已清空）', () => {
+    expect(mapContextTier(400_000)).toBe(400_000)
     expect(mapContextTier(200_000)).toBe(200_000)
     expect(mapContextTier(1_000_000)).toBe(1_000_000)
-    expect(mapContextTier(500_000)).toBe(500_000) // 已是 500K 时不再翻倍改写
+    expect(mapContextTier(500_000)).toBe(500_000) // 旧存档里的 500K 原样保留
   })
 
-  it('mapContextTiers 改写后去重升序（上游同时发 400K 与 500K 也不出重项）', () => {
-    expect(mapContextTiers([200_000, 400_000, 1_000_000])).toEqual([200_000, 500_000, 1_000_000])
-    expect(mapContextTiers([400_000, 500_000, 200_000])).toEqual([200_000, 500_000])
+  it('mapContextTiers 只做去重 + 升序，不改写数值', () => {
+    expect(mapContextTiers([200_000, 400_000, 1_000_000])).toEqual([200_000, 400_000, 1_000_000])
+    expect(mapContextTiers([400_000, 400_000, 200_000])).toEqual([200_000, 400_000])
     expect(mapContextTiers([])).toEqual([])
   })
 
-  it('migrateContextBudgets 把旧存档里的 400K 选择读成 500K', () => {
+  it('migrateContextBudgets 对旧存档恒等（不再把 400K 读成 500K）', () => {
     expect(migrateContextBudgets({ qmodel_38max: 400_000, dmodel: 200_000 }))
-      .toEqual({ qmodel_38max: 500_000, dmodel: 200_000 })
+      .toEqual({ qmodel_38max: 400_000, dmodel: 200_000 })
     expect(migrateContextBudgets({})).toEqual({})
   })
 
-  it('上游声明 400K 档时，解析出的档位表与默认窗口都是改写后的值', () => {
+  it('上游声明 400K 默认档时，档位表原样保留、默认窗口取 1M', () => {
     // 实测上游形状：`[200000, 400000, 1000000]`，默认档 is_default 在 400K 上。
     const info = parseUpstreamModel(rawModel({
       context_config: {
@@ -474,18 +477,30 @@ describe('档位改写表（400K → 500K，用户要求 2026-10-24）', () => {
         c1m: { token_count: 1_000_000 },
       },
     }))
-    expect(info.contextTiers).toEqual([200_000, 500_000, 1_000_000])
-    expect(info.contextWindow).toBe(500_000)
-    // 保存的 500K 预算能命中改写后的档位表（applyContextBudgets 不再把它当「不在档里」丢掉）。
-    expect(applyContextBudgets([info], { dmodel: 500_000 })[0]?.contextWindow).toBe(500_000)
+    expect(info.contextTiers).toEqual([200_000, 400_000, 1_000_000])
+    expect(info.contextWindow).toBe(1_000_000)
+    // 用户保存 400K 时仍能命中档位表。
+    expect(applyContextBudgets([info], { dmodel: 400_000 })[0]?.contextWindow).toBe(400_000)
   })
 
-  it('默认档不在改写表里时窗口不受影响', () => {
+  it('上游没声明档位时合成三档，默认 1M', () => {
+    const info = parseUpstreamModel(rawModel())
+    expect(info.contextTiers).toEqual([200_000, 400_000, 1_000_000])
+    expect(info.contextWindow).toBe(1_000_000)
+  })
+
+  it('上游档位里没有 1M 时，沿用上游默认档', () => {
     const info = parseUpstreamModel(rawModel({
-      context_config: { c200k: { token_count: 200_000, is_default: true }, c1m: { token_count: 1_000_000 } },
+      context_config: { c200k: { token_count: 200_000, is_default: true }, c400k: { token_count: 400_000 } },
     }))
     expect(info.contextWindow).toBe(200_000)
-    expect(info.contextTiers).toEqual([200_000, 1_000_000])
+    expect(info.contextTiers).toEqual([200_000, 400_000])
+  })
+
+  it('fallbackModelInfo 用客户端默认值（1M + 三档），不再退回 200K', () => {
+    const info = fallbackModelInfo(QODER_FALLBACK_MODELS[0]!)
+    expect(info.contextWindow).toBe(1_000_000)
+    expect(info.contextTiers).toEqual([200_000, 400_000, 1_000_000])
   })
 })
 

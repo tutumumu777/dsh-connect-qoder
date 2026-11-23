@@ -14,6 +14,7 @@ import {
   retryAfterMsOf,
   retryAfterMsOfHeader,
   isQoderUpstreamError,
+  isStaleSessionError,
   upstreamUnavailableOf,
   QoderUpstreamError,
   QoderUpstreamClient,
@@ -1733,5 +1734,76 @@ describe('chatStream 的 session_id 稳定性（issue #42）', () => {
     expect(bodies).toHaveLength(1)
     expect(typeof bodies[0]!.session_id).toBe('string')
     expect((bodies[0]!.session_id as string).length).toBeGreaterThan(0)
+  })
+})
+
+// ==========================================================================
+// 会话被上游提前回收：105 / TOKEN_EXPIRE 自愈（2026-11-23）
+//
+// 现场：上游对提前失效的 jobToken 回 `HTTP 401 {"code":"TOKEN_EXPIRE",
+// "message":"token is not active"}`。这是字符串码，classifyBusinessCode 不认，
+// 回落 401 → auth → shim 回 invalid_api_key → 界面「API 密钥无效」。而内存里的
+// holder 按本地 expireTime 仍然「有效」，ensureSession 会一直复用坏会话。
+//
+// 修法：chatStream 命中这三类形态时，重换一次 jobToken 再试一次；只试一次。
+// ==========================================================================
+describe('会话被上游提前回收（105 / TOKEN_EXPIRE）自愈', () => {
+  const JOB = {
+    id: 'u1', name: 'n', expireTime: Date.now() + 1_000_000,
+    securityOauthToken: 'jt-CHAT', refreshToken: 'r', userType: 'personal_standard',
+  }
+
+  /** 第一次 chat 按给定状态/信封失败，第二次成功；jobToken 每次都给好的。 */
+  function stub(failStatus: number, failBody: string) {
+    const calls = { chat: 0, jobToken: 0 }
+    const fetchImpl = (async (url: string | URL) => {
+      const u = String(url)
+      if (u.includes('/user/jobToken')) {
+        calls.jobToken += 1
+        return new Response(JSON.stringify(JOB), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (u.includes('/api/v1/jobToken/exchange')) {
+        return new Response(JSON.stringify({
+          token: 'jt-SASH', expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      calls.chat += 1
+      if (calls.chat === 1) {
+        return new Response(failBody, { status: failStatus, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response('', { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    }) as unknown as typeof fetch
+    return { calls, client: new QoderUpstreamClient('cn', { fetch: fetchImpl }) }
+  }
+
+  it('401 + TOKEN_EXPIRE：重换一次 jobToken，重试一次就成功', async () => {
+    const { calls, client } = stub(401, '{"code":"TOKEN_EXPIRE","message":"token is not active"}')
+    await client.chatStream('pt-x', 'qfmodel', [{ role: 'user', content: 'hi' }], { onDelta: () => {} })
+    expect(calls.chat, '第一次失败 + 第二次成功').toBe(2)
+    expect(calls.jobToken, '初次交换 + 命中后重换').toBe(2)
+  })
+
+  it('403 + 业务码 105：同样自愈', async () => {
+    const { calls, client } = stub(403, '{"code":"105","message":"Login expired"}')
+    await client.chatStream('pt-x', 'qfmodel', [{ role: 'user', content: 'hi' }], { onDelta: () => {} })
+    expect(calls.chat).toBe(2)
+    expect(calls.jobToken).toBe(2)
+  })
+
+  it('401 + TOKEN_INVALID（真坏凭据）：不重换、不重试，原样抛出', async () => {
+    const { calls, client } = stub(401, '{"code":"TOKEN_INVALID","message":"invalid token"}')
+    await expect(client.chatStream('pt-x', 'qfmodel', [{ role: 'user', content: 'hi' }], { onDelta: () => {} }))
+      .rejects.toMatchObject({ kind: 'auth', code: 'TOKEN_INVALID', status: 401 })
+    expect(calls.chat).toBe(1)
+    expect(calls.jobToken).toBe(1)
+  })
+
+  it('isStaleSessionError 只认这三类形态', () => {
+    expect(isStaleSessionError(new QoderUpstreamError('auth', 'x', 401, 'TOKEN_EXPIRE'))).toBe(true)
+    expect(isStaleSessionError(new QoderUpstreamError('auth', 'x', 403, '105'))).toBe(true)
+    expect(isStaleSessionError(new QoderUpstreamError('auth', 'HTTP 401 token is not active', 401))).toBe(true)
+    expect(isStaleSessionError(new QoderUpstreamError('auth', 'x', 401, 'TOKEN_INVALID'))).toBe(false)
+    expect(isStaleSessionError(new QoderUpstreamError('transient', 'x', 502, '10605'))).toBe(false)
+    expect(isStaleSessionError(new Error('x'))).toBe(false)
   })
 })

@@ -517,6 +517,54 @@ const DEFAULT_HEADERS: Record<string, string> = {
   'cosy-business-type': 'agent',
 }
 
+/** chatStream 的选项（chatStream / chatStreamOnce 共用）。 */
+export interface ChatStreamOptions {
+  tools?: unknown[]
+  isReasoning?: boolean
+  /**
+   * 思考强度档位名（`low` / `medium` / `xhigh` …），来自插件设置里为该
+   * 模型保存的值。
+   *
+   * 实测自 Qoder 官方客户端（app.asar.unpacked 的 SDK）：档位**不走**
+   * `model_config`，而是请求体顶层的 `reasoningEffort` 加
+   * `parameters.reasoning_effort`——官方客户端两者同时写
+   * （`{..., reasoningEffort:"none", parameters:{...A.parameters,
+   *   reasoning_effort:"none"}}`），只写一个有可能被网关忽略。
+   * 缺席时不下发任何档位字段，由上游用模型自己的默认档。
+   */
+  reasoningEffort?: string
+  isVl?: boolean
+  signal?: AbortSignal
+  onDelta: (delta: QoderChatDelta) => void
+  userType?: string
+  /**
+   * 会话标识（issue #42）—— Qoder 网关的 prompt cache 按请求体 `session_id`
+   * 分桶，所以每会话必须稳定。DSH 每轮把 `session.id` 盖在 LLM 请求上，
+   * shim 从 `session_id` 头读出后传到这里。缺席（老宿主 / 直连调用）时退回
+   * 随机值，保持旧调用方行为不变。
+   */
+  sessionId?: string
+}
+
+/**
+ * 这个错误是不是「会话被上游提前回收」——可以换一次 jobToken 再试。
+ *
+ * 三种形态都来自现场（2026-11-23，global/dfmodel）：
+ * - 业务码 `105`（官方码表：登录态或 Access Token 已过期）；
+ * - 字符串码 `TOKEN_EXPIRE`（`{"code":"TOKEN_EXPIRE","message":"token is not
+ *   active"}`，不在数值码表里，旧实现会回落成 401 → auth）；
+ * - 401 + 文案 `token is not active`（信封没给可识别 code 时的兜底）。
+ *
+ * **不能**把它扩成「所有 auth 都重试」：真正坏掉的 PAT 会因此多换一次令牌、
+ * 多打一发请求，最后还是同一个错。
+ */
+export function isStaleSessionError(error: unknown): error is QoderUpstreamError {
+  if (!(error instanceof QoderUpstreamError)) return false
+  const code = String(error.code ?? '')
+  if (code === '105' || code === 'TOKEN_EXPIRE') return true
+  return error.status === 401 && /TOKEN_EXPIRE|token is not active/i.test(error.message)
+}
+
 /**
  * Qoder 上游客户端。每个区域一个实例；会话按需惰性交换与续期。
  */
@@ -760,33 +808,32 @@ export class QoderUpstreamClient {
     credential: string,
     modelKey: string,
     messages: Array<Record<string, unknown>>,
-    options: {
-      tools?: unknown[]
-      isReasoning?: boolean
-      /**
-       * 思考强度档位名（`low` / `medium` / `xhigh` …），来自插件设置里为该
-       * 模型保存的值。
-       *
-       * 实测自 Qoder 官方客户端（app.asar.unpacked 的 SDK）：档位**不走**
-       * `model_config`，而是请求体顶层的 `reasoningEffort` 加
-       * `parameters.reasoning_effort`——官方客户端两者同时写
-       * （`{..., reasoningEffort:"none", parameters:{...A.parameters,
-       *   reasoning_effort:"none"}}`），只写一个有可能被网关忽略。
-       * 缺席时不下发任何档位字段，由上游用模型自己的默认档。
-       */
-      reasoningEffort?: string
-      isVl?: boolean
-      signal?: AbortSignal
-      onDelta: (delta: QoderChatDelta) => void
-      userType?: string
-      /**
-       * 会话标识（issue #42）—— Qoder 网关的 prompt cache 按请求体 `session_id`
-       * 分桶，所以每会话必须稳定。DSH 每轮把 `session.id` 盖在 LLM 请求上，
-       * shim 从 `session_id` 头读出后传到这里。缺席（老宿主 / 直连调用）时退回
-       * 随机值，保持旧调用方行为不变。
-       */
-      sessionId?: string
-    },
+    options: ChatStreamOptions,
+  ): Promise<void> {
+    // local patch: 105 retry v2 — 会话被上游提前回收时，重换一次 jobToken 并重试一次
+    const staleHolder = this.holders.get(credential)
+    try {
+      return await this.chatStreamOnce(credential, modelKey, messages, options)
+    } catch (error) {
+      if (!isStaleSessionError(error)) throw error
+      const code = String(error.code ?? '')
+      // 冷启动时 chatStream 前可能还没有 holder（ensureSession 在 chatStreamOnce
+      // 里才交换），此时 staleHolder 是 undefined、current 是新换来的坏会话 ——
+      // 必须刷新。只有「别的并发请求已经把 holder 换掉了」才跳过。
+      const current = this.holders.get(credential)
+      if (staleHolder === undefined || current === staleHolder) {
+        this.log(`聊天命中会话过期（${code || error.status}），重新交换 jobToken 后重试一次`)
+        await this.exchangeJobToken(credential)
+      }
+      return await this.chatStreamOnce(credential, modelKey, messages, options)
+    }
+  }
+
+  private async chatStreamOnce(
+    credential: string,
+    modelKey: string,
+    messages: Array<Record<string, unknown>>,
+    options: ChatStreamOptions,
   ): Promise<void> {
     const holder = await this.ensureSession(credential)
     const template = deepClone(createChatBodyTemplate())

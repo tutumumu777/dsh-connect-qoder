@@ -1989,16 +1989,15 @@ describe('shouldRecordPoolFailure —— 不该记的失败一条都不记', () 
 })
 
 // ==========================================================================
-// 档位改写表：存档与上游的 400K 在 /usage 文档里都读成 500K
+// 客户端档位：存档与上游的 400K 不再被改写成 500K
 //
-// 用户要求（2026-10-24）：上下文档位下拉里的 400K 改成 500K。改写在解析边界
-// （`catalog.ts` 的 `QODER_CONTEXT_TIER_OVERRIDES`），这里钉的是**端到端**：
-// 存档里留着改写前的预算 400K 与旧快照窗口 400K，读一次 /usage，文档里的
-// 档位表、生效窗口、回显预算三处必须都是改写后的 500K —— 任何一处漏过改写
-// 表，下拉就会出现「选中值不在选项里」。
+// 历史行为（2026-10-24）是把 400K 呈现成 500K；2026-11-23 起与 Qoder 客户端
+// 对齐为 200K / 400K / 1M，改写表清空。这里钉的是**端到端**：存档里留着 400K
+// 预算与 400K 窗口，读一次 /usage，档位表、生效窗口、回显预算三处必须都还是
+// 400K —— 任何一处还在改写，下拉就会出现「选中值不在选项里」。
 // ==========================================================================
 
-describe('档位改写表：400K 在 /usage 文档里读成 500K', () => {
+describe('客户端档位：400K 在 /usage 文档里保持 400K', () => {
   it('档位表、生效窗口、回显预算三处一致改写', async () => {
     const realFetch = globalThis.fetch
     globalThis.fetch = (async (input: string | URL | Request): Promise<Response> => {
@@ -2065,13 +2064,13 @@ describe('档位改写表：400K 在 /usage 文档里读成 500K', () => {
         const parsed = JSON.parse(String(res.body())) as NonNullable<typeof doc>
         doc = parsed
         const tiers = (parsed.models.find(m => m.key === 'qfmodel')?.contextTiers ?? []) as number[]
-        if (tiers.includes(500_000)) break
+        if (tiers.includes(400_000) && tiers.includes(1_000_000)) break
         await new Promise(resolve => setTimeout(resolve, 50))
       }
       const row = doc?.models.find(m => m.key === 'qfmodel')
-      expect(row?.contextTiers).toEqual([200_000, 500_000, 1_000_000])
-      expect(row?.contextWindow).toBe(500_000)
-      expect(doc?.contextBudgets).toEqual({ qfmodel: 500_000 })
+      expect(row?.contextTiers).toEqual([200_000, 400_000, 1_000_000])
+      expect(row?.contextWindow).toBe(400_000)
+      expect(doc?.contextBudgets).toEqual({ qfmodel: 400_000 })
     } finally {
       globalThis.fetch = realFetch
     }

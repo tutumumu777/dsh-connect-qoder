@@ -25,6 +25,20 @@
   - **取舍**：没有改 DSH 的 `includeHarnessIdentity`（宿主全局开关），只动本插件的
     出站消息——影响面仅 Qoder 通道；升级上游时这部分会被覆盖，需要重新打补丁。
 
+- **会话被上游提前回收时自动重换 jobToken 并重试一次（`105` / `TOKEN_EXPIRE`）。**
+  - **现场**：2026-11-23 本机，上游对提前失效的 jobToken 回
+    `HTTP 401 {"code":"TOKEN_EXPIRE","message":"token is not active"}`。字符串码不在
+    数值码表里，旧实现回落 `401 → auth → invalid_api_key`，界面显示「API 密钥无效」；
+    而内存里的 holder 按本地 `expireTime` 仍「有效」，`ensureSession` 会一直复用坏
+    会话，不重启就一直失败。
+  - **改法**：`chatStream` 外层捕获 `105` / `TOKEN_EXPIRE` / 401 + `token is not active`
+    → 重换一次 jobToken → 重试一次（不循环）。并发请求用 holder 去重；真正的坏 PAT
+    （如 `TOKEN_INVALID`）不重换、不重试。
+
+- **上下文档位与 Qoder 客户端对齐：200K / 400K / 1M，默认 1M。**
+  - 移除 400K→500K 的呈现改写（客户端本来就有 400K 档，改写后反而选不到）；
+    上游没下发 `context_config` 时合成三档并默认 1M；静态兜底目录同样用 1M。
+
 ## 1.27.1 (2026-11-20)
 
 > **修 issue #48：上游 `code 147`（付费资源包余额不足）被误判成凭据失效，界面显示
