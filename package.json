@@ -63,6 +63,7 @@
     "docs/DSH-0.2.2-RC5-FOLLOWUP.md"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "prepack": "npm run build",
     "build": "tsdown",
     "test": "vitest run",
