@@ -126,7 +126,7 @@ Windows 用 `dir` / `Select-String` 做同样的检查。
 
 ```bash
 # 1. 克隆（固定一个路径，后面 link 要用）
-git clone git@github.com:tutumumu777/dsh-connect-qoder.git \
+git clone https://github.com/tutumumu777/dsh-connect-qoder.git \
   ~/ttmm/projects/dsh-connect-qoder-fork
 cd ~/ttmm/projects/dsh-connect-qoder-fork
 
