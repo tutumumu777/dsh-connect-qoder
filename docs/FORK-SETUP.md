@@ -11,7 +11,7 @@ RESOURCE_LIMIT / serviceAvailable:false`（伪装成排队限流，等 30 秒、
 两种装法任选其一：
 
 - **方案 A（推荐）**：从 GitHub Release 装打包好的 tgz。目标机器不需要
-  Node / pnpm 构建链。
+  Node / 构建链，只要有一个能联网的 pnpm。
 - **方案 B**：克隆 fork、本地构建，profile 用 `link:` 指向它。
   本机 2026-11-23 用这种方式验证通过。
 
