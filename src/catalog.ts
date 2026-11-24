@@ -366,6 +366,13 @@ export function parseUpstreamModel(raw: QoderUpstreamModel): QoderModelInfo {
   // 客户端档位：上游没下发 context_config 时，按 Qoder 客户端的 200K/400K/1M
   // 三档兜底，默认取 1M。上游给了档位表就原样使用；只要表里有 1M，默认仍取 1M
   // （与客户端行为一致）。档位是插件本地的上下文预算，请求体里没有这个字段。
+  //
+  // `max_input_tokens` **不是**上下文窗口、也不是单请求输入上限（实测
+  // 2026-11-24，global）：`gmodel` / GLM-5.3 这一行的 `max_input_tokens` 只有
+  // 180000，而它的 `context_config` 声明 200K/400K/1M。按 185K / 227K / 545K /
+  // 863K token 递增发真实请求，网关全部正常受理（最后一条上报
+  // `inputTokens: 863485`、正常输出），Qoder 客户端 UI 也把该模型的滑块画到 1M。
+  // 所以它只在「档位表里没有 1M」时作为窗口备胎（就是下面这行），不要拿它当上限。
   const upstreamTiers = contextTiersOf(raw)
   const tiers = upstreamTiers === undefined ? [...QODER_CLIENT_CONTEXT_TIERS] : mapContextTiers(upstreamTiers)
   const contextWindow = tiers.includes(QODER_CLIENT_DEFAULT_CONTEXT)
