@@ -26,6 +26,8 @@
   <a href="https://github.com/dingminhua/dsh-connect-qoder/stargazers"><img src="https://img.shields.io/github/stars/dingminhua/dsh-connect-qoder?style=flat-square" alt="GitHub stars"></a>
 </p>
 
+> **这是个人 fork**：在 1.27.1 基础上加入了 Qoder 内容过滤修复（发请求前剥掉 DSH 身份开场白）、会话过期自愈与上下文档位对齐。npm / 插件市场里的 `@dmh2002/dsh-connect-qoder` **不含**这些改动，请勿从市场更新覆盖。其他机器安装见 [docs/FORK-SETUP.md](docs/FORK-SETUP.md)。
+
 一个独立的 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) bundle 插件。它把 Qoder 账号的模型接到 DSH 的模型选择器，同时提供模型管理与只读的用量概览。**国内版与国际版是两个并行的供应商（`qoder` / `qoder-global`），可同时使用**；插件的设置页以 tab 区分两者，方便统一管理。
 
 > Qoder 官方不提供 OpenAI 兼容端点（其官方 SDK 只是 agent 启动器），因此本插件直连 Qoder 的 cosy 网关，实现了协议的最小客户端，无需在 Qoder 桌面端登录——只需一个 PAT（Personal Access Token）。
@@ -86,6 +88,8 @@ DSH PiAiAdapter（每个 provider 一套）
 ## 安装
 
 ### 从发布包安装（推荐）
+
+> **fork 用户**：不要用下面的 npm / 插件市场命令（装到的是上游版本，不含本 fork 的修复）。请按 [docs/FORK-SETUP.md](docs/FORK-SETUP.md) 从本仓库的 Release tgz（方案 A）或本地 `link:`（方案 B）安装。
 
 ```bash
 dsh plugin --profile desktop add @dmh2002/dsh-connect-qoder   # Desktop
