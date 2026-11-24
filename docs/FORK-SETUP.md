@@ -6,7 +6,10 @@
 `You are an AI agent powered by DeepSeek Harness.`，先把它剥掉再发。
 原因是 Qoder 上游对这句做内容过滤，会回 `403 / code 10605 /
 RESOURCE_LIMIT / serviceAvailable:false`（伪装成排队限流，等 30 秒、
-换 PAT 都没用）。此外还含两项与官方不同的修复：会话过期自愈（`105` / `TOKEN_EXPIRE` 时重换 jobToken 重试一次）、上下文档位对齐 Qoder 客户端（200K / 400K / 1M，默认 1M）。版本号：`1.27.1-fork.3`。
+换 PAT 都没用）。此外还含两项与官方不同的修复：会话过期自愈（`105` / `TOKEN_EXPIRE`
+时重换 jobToken 重试一次，**聊天 / 积分 / 活动三条出站面都覆盖**）、上下文档位对齐
+Qoder 客户端（从上游 `context_config` 逐模型读取 200K / 400K / 1M，默认取 1M）。
+版本号：`1.27.1-fork.3`。
 
 两种装法任选其一：
 
