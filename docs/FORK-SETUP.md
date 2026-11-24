@@ -6,7 +6,7 @@
 `You are an AI agent powered by DeepSeek Harness.`，先把它剥掉再发。
 原因是 Qoder 上游对这句做内容过滤，会回 `403 / code 10605 /
 RESOURCE_LIMIT / serviceAvailable:false`（伪装成排队限流，等 30 秒、
-换 PAT 都没用）。此外还含两项与官方不同的修复：会话过期自愈（`105` / `TOKEN_EXPIRE` 时重换 jobToken 重试一次）、上下文档位对齐 Qoder 客户端（200K / 400K / 1M，默认 1M）。版本号：`1.27.1-fork.2`。
+换 PAT 都没用）。此外还含两项与官方不同的修复：会话过期自愈（`105` / `TOKEN_EXPIRE` 时重换 jobToken 重试一次）、上下文档位对齐 Qoder 客户端（200K / 400K / 1M，默认 1M）。版本号：`1.27.1-fork.3`。
 
 两种装法任选其一：
 
@@ -46,7 +46,7 @@ p = 'package.json'
 d = json.load(open(p))
 d['dependencies']['@dmh2002/dsh-connect-qoder'] = (
     'https://github.com/tutumumu777/dsh-connect-qoder/releases/download/'
-    'v1.27.1-fork.2/dmh2002-dsh-connect-qoder-1.27.1-fork.2.tgz'
+    'v1.27.1-fork.3/dmh2002-dsh-connect-qoder-1.27.1-fork.3.tgz'
 )
 json.dump(d, open(p, 'w'), indent=2, ensure_ascii=False)
 open(p, 'a').write('\n')
@@ -71,7 +71,7 @@ notepad package.json
 改成：
 
 ```json
-"@dmh2002/dsh-connect-qoder": "https://github.com/tutumumu777/dsh-connect-qoder/releases/download/v1.27.1-fork.2/dmh2002-dsh-connect-qoder-1.27.1-fork.2.tgz"
+"@dmh2002/dsh-connect-qoder": "https://github.com/tutumumu777/dsh-connect-qoder/releases/download/v1.27.1-fork.3/dmh2002-dsh-connect-qoder-1.27.1-fork.3.tgz"
 ```
 
 不要动 `dsh.profile.bundles` 里的条目——它按包名加载，URL 依赖同样生效。
@@ -107,7 +107,7 @@ grep '"version"' \
   ~/.dsh/profiles/desktop/node_modules/@dmh2002/dsh-connect-qoder/package.json | head -1
 ```
 
-期望：文件存在；grep 输出 `2`；版本是 `1.27.1-fork.2`。
+期望：文件存在；grep 输出 `2`；版本是 `1.27.1-fork.3`。
 
 Windows 用 `dir` / `Select-String` 做同样的检查。
 
@@ -178,10 +178,10 @@ pnpm install
 ## 常见问题
 
 - **插件市场提示更新 / 显示 1.27.1**：不要从市场更新，会把 fork 覆盖回官方版。
-  fork 的版本号是 `1.27.1-fork.2`，看到这个版本说明装对了。
+  fork 的版本号是 `1.27.1-fork.3`，看到这个版本说明装对了。
 - **Release 下载超时**：GitHub Release 资产走 `objects.githubusercontent.com`，
   网络差时可能失败。可以先在浏览器/下载工具里把 tgz 下到本地，依赖改成
-  `file:/绝对路径/dmh2002-dsh-connect-qoder-1.27.1-fork.2.tgz`，再 `pnpm install`。
+  `file:/绝对路径/dmh2002-dsh-connect-qoder-1.27.1-fork.3.tgz`，再 `pnpm install`。
 - **构建报 `Failed to import module "unrun"`**：pnpm 不自动装 tsdown 的可选 peer，
   在 fork 目录执行 `pnpm add -D unrun` 再 build。仓库已把它写进 devDependencies。
 - **`pnpm test` 有一条 `RSA_PKCS1_PADDING is no longer supported`**：
@@ -195,6 +195,10 @@ pnpm install
 
 ## 变更记录
 
+- `1.27.1-fork.3`：把会话过期自愈补齐到 sash 面（积分查询 / 活动查询）。抽出
+  `withStaleSessionRetry(credential, label, run)`，聊天、积分、活动三条出站面共用；
+  命中 `isStaleSessionError` 时重换一次 `jobToken` 再试一次（只一次），真坏凭据不重试。
+  新增 `tests/sash-retry.spec.ts`。
 - `1.27.1-fork.2`：在 fork.1 基础上加 `isStaleSessionError` 自愈（`src/upstream.ts`）与客户端档位 200K/400K/1M（`src/catalog.ts`），并把版本号同步成 `1.27.1-fork.2`（构建期注入，插件设置/心跳里可见）。
 - `1.27.1-fork.1`：`src/messages.ts` 新增 `stripHarnessIdentityOpener`，
   在 `convertIncomingMessage` 里只对 `role === 'system'` 的消息剥离开头这句；

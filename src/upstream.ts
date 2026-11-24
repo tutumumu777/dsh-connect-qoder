@@ -801,6 +801,37 @@ export class QoderUpstreamClient {
   }
 
   /**
+   * 会话被上游提前回收时，换一次 `jobToken` 再重试一次（**只重试一次**）。
+   *
+   * 三条出站面共用（聊天 / 积分查询 / 活动查询）：它们都先 `ensureSession` 拿
+   * `jt-…`，而上游会在本地 `expireTime` 之前就把会话判过期（实测
+   * `401 {"code":"TOKEN_EXPIRE","message":"token is not active"}` 与
+   * `403 {"code":"105"}`）。判据只看 {@link isStaleSessionError} 认的三类形态，
+   * 真坏凭据（`TOKEN_INVALID` 等）**不**重试——否则只是把同一个错误多打一发。
+   */
+  private async withStaleSessionRetry<T>(
+    credential: string,
+    label: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const staleHolder = this.holders.get(credential)
+    try {
+      return await run()
+    } catch (error) {
+      if (!isStaleSessionError(error)) throw error
+      // 冷启动时可能还没有 holder（ensureSession 在真正发请求时才交换），此时
+      // staleHolder 是 undefined、current 是新换来的坏会话 —— 必须刷新。只有
+      // 「别的并发请求已经把 holder 换掉了」才跳过，避免同一波并发重复换票。
+      const current = this.holders.get(credential)
+      if (staleHolder === undefined || current === staleHolder) {
+        this.log(`${label}命中会话过期（${String(error.code ?? error.status)}），重新交换 jobToken 后重试一次`)
+        await this.exchangeJobToken(credential)
+      }
+      return await run()
+    }
+  }
+
+  /**
    * 聊天 SSE 流。onDelta 逐行回调；返回 null 表示正常结束。
    * 令牌：`credential` 只在会话续期时使用。
    */
@@ -810,23 +841,11 @@ export class QoderUpstreamClient {
     messages: Array<Record<string, unknown>>,
     options: ChatStreamOptions,
   ): Promise<void> {
-    // local patch: 105 retry v2 — 会话被上游提前回收时，重换一次 jobToken 并重试一次
-    const staleHolder = this.holders.get(credential)
-    try {
-      return await this.chatStreamOnce(credential, modelKey, messages, options)
-    } catch (error) {
-      if (!isStaleSessionError(error)) throw error
-      const code = String(error.code ?? '')
-      // 冷启动时 chatStream 前可能还没有 holder（ensureSession 在 chatStreamOnce
-      // 里才交换），此时 staleHolder 是 undefined、current 是新换来的坏会话 ——
-      // 必须刷新。只有「别的并发请求已经把 holder 换掉了」才跳过。
-      const current = this.holders.get(credential)
-      if (staleHolder === undefined || current === staleHolder) {
-        this.log(`聊天命中会话过期（${code || error.status}），重新交换 jobToken 后重试一次`)
-        await this.exchangeJobToken(credential)
-      }
-      return await this.chatStreamOnce(credential, modelKey, messages, options)
-    }
+    return await this.withStaleSessionRetry(
+      credential,
+      '聊天',
+      () => this.chatStreamOnce(credential, modelKey, messages, options),
+    )
   }
 
   private async chatStreamOnce(
@@ -963,6 +982,10 @@ export class QoderUpstreamClient {
    * 这解释了「令牌明明是好的、聊天也正常，积分却永远拿不到」——以前用错凭据。
    */
   async fetchUsage(credential: string, signal?: AbortSignal): Promise<QoderUsage | undefined> {
+    return await this.withStaleSessionRetry(credential, '积分查询', () => this.fetchUsageOnce(credential, signal))
+  }
+
+  private async fetchUsageOnce(credential: string, signal?: AbortSignal): Promise<QoderUsage | undefined> {
     const url = `${this.region.openapi}/sash/api/v2/me/usage`
     try {
       const holder = await this.ensureSession(credential)
@@ -1060,6 +1083,10 @@ export class QoderUpstreamClient {
    * 当期下发），缺字段就少渲染一点，绝不替上游编标题或链接。
    */
   async fetchCampaignFeed(credential: string, signal?: AbortSignal): Promise<QoderCampaignFeed> {
+    return await this.withStaleSessionRetry(credential, '活动查询', () => this.fetchCampaignFeedOnce(credential, signal))
+  }
+
+  private async fetchCampaignFeedOnce(credential: string, signal?: AbortSignal): Promise<QoderCampaignFeed> {
     const holder = await this.ensureSession(credential)
     const url = `${this.region.openapi}${this.region.campaignsPath}${CAMPAIGNS_QUERY}`
     const data = await this.sashRequest('GET', holder, url, undefined, signal)

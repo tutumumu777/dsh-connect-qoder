@@ -2,6 +2,24 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.27.1-fork.3（2026-11-24）
+
+### 修复
+
+- **积分查询与活动查询也会从「会话被上游提前回收」里自愈。**
+  - **现场**：fork.2 的自愈只包了聊天面。上游把 `jobToken` 会话提前判过期后，聊天
+    已经能自己换票重试，但积分卡片（`GET /sash/api/v2/me/usage`）与活动区
+    （`GET /sash/.../campaigns`）仍旧一直报「API 密钥无效」，直到重启 DSH ——
+    这两条走的是同一枚 `jt-…`，而 `ensureSession` 还按本地 `expireTime` 认为它有效。
+  - **改法**：抽出 `withStaleSessionRetry(credential, label, run)`，聊天 / 积分 /
+    活动三条出站面共用：命中 `isStaleSessionError` 的三类形态时，重换一次
+    `jobToken` 再试一次（**只试一次**），并用 holder 快照去重，避免同一波并发
+    重复换票。真坏凭据（`TOKEN_INVALID` 等）不重试，错误原样抛出 ——
+    credential-recovery 的「凭据是否可用」判定因此照旧。
+  - **测试**：新增 `tests/sash-retry.spec.ts`（用量 / 活动各验「过期自愈」与
+    「真坏凭据不重试」）；`tests/device-risk.spec.ts` 的直连回退计数随「一次
+    fetchUsage 现在是两轮」更新为 4，四条都断言带齐风控头。
+
 ## 1.27.1-fork.2（2026-11-24）
 
 > 首个带标签的发布：含本页两条修复（identity 开场白剥离、会话过期自愈 + 客户端 200K/400K/1M 档位）。插件设置里显示的版本号即本标签。

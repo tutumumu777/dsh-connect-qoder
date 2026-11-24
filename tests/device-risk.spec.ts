@@ -203,8 +203,10 @@ describe('用量查询的 sash 头按区域附加', () => {
     }) as unknown as typeof fetch
     const client = new QoderUpstreamClient('global', { fetch: fetchImpl })
     await client.fetchUsage('pt-x').catch(() => undefined)
-    // 主路径 1 次 + 回退 1 次，两条都必须带风控头。
-    expect(seen.length).toBe(2)
+    // 一次 fetchUsage 现在是「两轮」：会话过期自愈会重换 jobToken 再试一轮。
+    // 每轮都是主路径 + 直连回退，所以共 4 次请求 —— 4 条都必须带风控头
+    // （回退路径漏头会让风控在唯一还活着的那条链路上失效）。
+    expect(seen.length).toBe(4)
     for (const sent of seen) {
       expect(sent['cosy-machinetoken']).toBeTruthy()
       expect(sent['cosy-machinecode']).toBeTruthy()
