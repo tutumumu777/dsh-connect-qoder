@@ -2,7 +2,9 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## 1.27.1-fork.2（2026-11-24）
+
+> 首个带标签的发布：含本页两条修复（identity 开场白剥离、会话过期自愈 + 客户端 200K/400K/1M 档位）。插件设置里显示的版本号即本标签。
 
 > **修 Qoder 上游对 DSH 身份开场白的内容过滤（2026-11-23 本机实测）。**
 > 上游把 system 消息开头的 `You are an AI agent powered by DeepSeek Harness.`
